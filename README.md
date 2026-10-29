@@ -3,20 +3,6 @@
 MediaPipe Face Landmarker(478 랜드마크) + WebGL 메쉬 워핑으로 웹캠 영상의 코를 실시간 변형합니다.
 AI 서버 없이 브라우저(기기 GPU)에서만 동작합니다.
 
-## 휴대폰 테스트 (GitHub Pages, HTTPS 자동 적용)
-
-```
-git init
-git add index.html README.md
-git commit -m "nose simulator"
-git branch -M main
-git remote add origin https://github.com/<계정>/nose-sim.git
-git push -u origin main
-```
-
-GitHub 저장소 → Settings → Pages → Branch: main, 폴더: / (root) → Save
-1~2분 뒤 https://<계정>.github.io/nose-sim/ 으로 휴대폰에서 접속
-
 ## 기능
 - 슬라이더 3종: 코 너비 / 코 길이 / 콧볼 너비 (-100 ~ +100, 더블탭 시 0)
 - 누르고 있으면 원본 비교

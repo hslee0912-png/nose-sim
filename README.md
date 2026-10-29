@@ -1,1 +1,29 @@
-# nose-sim
+# 코 성형 시뮬레이터 (모바일 웹)
+
+MediaPipe Face Landmarker(478 랜드마크) + WebGL 메쉬 워핑으로 웹캠 영상의 코를 실시간 변형합니다.
+AI 서버 없이 브라우저(기기 GPU)에서만 동작합니다.
+
+## 휴대폰 테스트 (GitHub Pages, HTTPS 자동 적용)
+
+```
+git init
+git add index.html README.md
+git commit -m "nose simulator"
+git branch -M main
+git remote add origin https://github.com/<계정>/nose-sim.git
+git push -u origin main
+```
+
+GitHub 저장소 → Settings → Pages → Branch: main, 폴더: / (root) → Save
+1~2분 뒤 https://<계정>.github.io/nose-sim/ 으로 휴대폰에서 접속
+
+## 기능
+- 슬라이더 3종: 코 너비 / 코 길이 / 콧볼 너비 (-100 ~ +100, 더블탭 시 0)
+- 누르고 있으면 원본 비교
+- 메뉴: 얼굴 메쉬 보기, 성능 정보(FPS·인식 ms·GPU/CPU), 떨림 보정, 사진 저장, 초기화
+- 전면/후면 카메라 전환
+
+## 구성
+- 라이브러리: @mediapipe/tasks-vision 0.10.35 (jsDelivr)
+- 모델: face_landmarker.task float16 (Google Storage)
+- 변형: 코 축(미간 168 → 비주 2) 기준 좌표계에서 가우시안 가중 변위, 얼굴 크기(눈꼬리 33↔263)로 정규화

@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>코 성형 시뮬레이터 (MediaPipe + WebGL)</title>
+<style>
+:root{
+  --ink:#1A1A1A; --chip:#FFFFFF; --track:#FFFFFF; --fill:#4A8EF0; --dim:rgba(0,0,0,.45);
+  --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#000;color:#fff;overflow:hidden;
+  font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",sans-serif}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#000}
+#gl,#overlay{position:absolute;width:100%;height:100%;object-fit:cover}
+#overlay{pointer-events:none}
+.mirror{transform:scaleX(-1)}
+video{position:absolute;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none} /* iOS: display:none이면 프레임이 갱신되지 않을 수 있음 */
+
+/* 상단 */
+.top{position:fixed;left:0;right:0;top:calc(var(--safe-t) + 14px);display:flex;justify-content:space-between;align-items:flex-start;padding:0 16px;z-index:5}
+.pill{display:flex;align-items:center;gap:8px;background:var(--chip);color:var(--ink);border:0;border-radius:999px;
+  padding:10px 18px;font-weight:700;font-size:14px;letter-spacing:.02em;box-shadow:0 2px 10px rgba(0,0,0,.25);cursor:pointer}
+.icon-btn{width:42px;height:42px;border-radius:50%;border:0;background:var(--dim);color:#fff;display:grid;place-items:center;cursor:pointer}
+.menu{position:fixed;left:16px;top:calc(var(--safe-t) + 66px);background:#fff;color:var(--ink);border-radius:14px;padding:6px;
+  min-width:210px;box-shadow:0 8px 30px rgba(0,0,0,.35);z-index:6}
+.menu label,.menu button{display:flex;justify-content:space-between;align-items:center;gap:12px;width:100%;padding:11px 12px;
+  border:0;background:none;font:inherit;font-size:14px;color:inherit;border-radius:10px;cursor:pointer;text-align:left}
+.menu label:hover,.menu button:hover{background:#F1F3F6}
+.menu input{width:18px;height:18px;accent-color:var(--fill)}
+
+/* 하단 컨트롤 */
+.bottom{position:fixed;left:0;right:0;bottom:calc(var(--safe-b) + 18px);display:flex;flex-direction:column;align-items:center;gap:16px;z-index:5}
+.slider-wrap{display:flex;align-items:center;gap:10px;width:min(78vw,340px)}
+.val{min-width:42px;text-align:center;font-size:13px;font-variant-numeric:tabular-nums;background:var(--dim);border-radius:999px;padding:3px 8px}
+input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:28px;background:transparent;touch-action:none}
+input[type=range]::-webkit-slider-runnable-track{height:3px;border-radius:2px;background:linear-gradient(to right,var(--fill) 0 var(--p,50%),var(--track) var(--p,50%) 100%)}
+input[type=range]::-moz-range-track{height:3px;border-radius:2px;background:var(--track)}
+input[type=range]::-moz-range-progress{height:3px;background:var(--fill)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:24px;height:24px;margin-top:-10.5px;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.4)}
+input[type=range]::-moz-range-thumb{width:24px;height:24px;border:0;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.4)}
+.tools{display:flex;gap:22px;align-items:center}
+.tool{position:relative;width:60px;height:60px;border-radius:50%;border:0;background:#fff;display:grid;place-items:center;cursor:pointer;
+  box-shadow:0 2px 10px rgba(0,0,0,.3)}
+.tool[aria-pressed=true]{outline:2px solid #fff;outline-offset:4px}
+.tool svg{width:38px;height:38px}
+.tool .dot{position:absolute;top:3px;right:3px;width:9px;height:9px;border-radius:50%;background:var(--fill);display:none}
+.tool.changed .dot{display:block}
+.row2{display:flex;gap:10px}
+.ghost{border:0;border-radius:999px;background:var(--dim);color:#fff;padding:8px 14px;font:inherit;font-size:13px;cursor:pointer;user-select:none;-webkit-user-select:none;touch-action:none}
+.ghost.active{background:#fff;color:var(--ink)}
+.caption{font-size:13px;opacity:.9;text-shadow:0 1px 3px rgba(0,0,0,.6)}
+
+/* 상태 */
+#status{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;
+  padding:24px;background:#000;z-index:10;line-height:1.6}
+#status p{margin:0;max-width:320px;color:#ddd;font-size:15px}
+#status button{border:0;border-radius:999px;background:#fff;color:var(--ink);padding:12px 26px;font:inherit;font-weight:700;cursor:pointer}
+.spinner{width:34px;height:34px;border:3px solid #444;border-top-color:#fff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spinner{animation:none}}
+#hint{position:fixed;top:45%;left:50%;transform:translate(-50%,-50%);background:var(--dim);padding:8px 14px;border-radius:999px;font-size:14px;z-index:4}
+#perf{position:fixed;right:16px;top:calc(var(--safe-t) + 66px);background:var(--dim);border-radius:10px;padding:8px 10px;font-size:12px;
+  font-variant-numeric:tabular-nums;line-height:1.5;z-index:4}
+[hidden]{display:none!important}
+button:focus-visible,input:focus-visible{outline:2px solid var(--fill);outline-offset:3px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="gl"></canvas>
+  <canvas id="overlay"></canvas>
+  <video id="video" playsinline muted autoplay></video>
+</div>
+
+<div class="top">
+  <button class="pill" id="menuBtn" aria-expanded="false">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><rect y="2" width="16" height="2" rx="1"/><rect y="7" width="16" height="2" rx="1"/><rect y="12" width="16" height="2" rx="1"/></svg>
+    코 성형
+  </button>
+  <button class="icon-btn" id="flipBtn" aria-label="카메라 전환">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3v5h5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 21v-5h-5"/></svg>
+  </button>
+</div>
+
+<div class="menu" id="menu" hidden>
+  <label>얼굴 메쉬 보기 <input type="checkbox" id="optMesh"></label>
+  <label>성능 정보 보기 <input type="checkbox" id="optPerf"></label>
+  <label>떨림 보정 <input type="checkbox" id="optSmooth" checked></label>
+  <button id="saveBtn">사진 저장</button>
+  <button id="resetBtn">모두 초기화</button>
+</div>
+
+<div id="perf" hidden></div>
+<div id="hint" hidden>얼굴을 화면 가운데에 맞춰 주세요</div>
+
+<div class="bottom">
+  <div class="caption" id="caption">코 너비</div>
+  <div class="slider-wrap">
+    <span class="val" id="val">0</span>
+    <input type="range" id="slider" min="-100" max="100" step="1" value="0" aria-label="조절 강도">
+  </div>
+  <div class="tools" role="group" aria-label="조절 부위">
+    <button class="tool" data-tool="width" aria-pressed="true" aria-label="코 너비">
+      <svg viewBox="0 0 40 40" fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 6c0 9-3 15-7 20 0 4 3 6 6 5 1.5 1.5 6.5 1.5 8 0 3 1 6-1 6-5-4-5-7-11-7-20"/>
+        <path d="M14 19h12M14 19l2-2M14 19l2 2M26 19l-2-2M26 19l-2 2" stroke="#4A8EF0"/>
+      </svg><span class="dot"></span>
+    </button>
+    <button class="tool" data-tool="length" aria-pressed="false" aria-label="코 길이">
+      <svg viewBox="0 0 40 40" fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 6c0 9-3 15-7 20 0 4 3 6 6 5 1.5 1.5 6.5 1.5 8 0 3 1 6-1 6-5-4-5-7-11-7-20"/>
+        <path d="M20 11v16M20 11l-2 2M20 11l2 2M20 27l-2-2M20 27l2-2" stroke="#4A8EF0"/>
+      </svg><span class="dot"></span>
+    </button>
+    <button class="tool" data-tool="alar" aria-pressed="false" aria-label="콧볼 너비">
+      <svg viewBox="0 0 40 40" fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M17 4c0 9-3 14-7 19 0 4 3 6 6 5 1.5 1.5 6.5 1.5 8 0 3 1 6-1 6-5-4-5-7-10-7-19"/>
+        <path d="M11 34h18M11 34l2-2M11 34l2 2M29 34l-2-2M29 34l-2 2" stroke="#4A8EF0"/>
+      </svg><span class="dot"></span>
+    </button>
+  </div>
+  <div class="row2">
+    <button class="ghost" id="compareBtn">누르고 있으면 원본</button>
+  </div>
+</div>
+
+<div id="status">
+  <div class="spinner" id="spin"></div>
+  <p id="statusText">얼굴 인식 모델을 불러오는 중입니다…</p>
+  <button id="startBtn" hidden>카메라 시작</button>
+</div>
+
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs";
+
+const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm";
+const MODEL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
+const N = 478;
+const $ = id => document.getElementById(id);
+const video = $("video"), glCanvas = $("gl"), ov = $("overlay"), octx = ov.getContext("2d");
+
+/* ---------------- 상태 ---------------- */
+const vals = { width: 0, length: 0, alar: 0 };   // -1 ~ 1
+const captions = { width: "코 너비", length: "코 길이", alar: "콧볼 너비" };
+let tool = "width", comparing = false, facing = "user", stream = null, landmarker = null, delegate = "";
+let showMesh = false, showPerf = false, smoothOn = true;
+
+function setStatus(text, { spin = false, button = null } = {}) {
+  $("status").hidden = false; $("statusText").textContent = text; $("spin").hidden = !spin;
+  $("startBtn").hidden = !button; if (button) $("startBtn").textContent = button;
+}
+
+/* ---------------- 삼각분할: 테셀레이션 엣지에서 삼각형 복원 ---------------- */
+const adj = Array.from({ length: N }, () => new Set());
+for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) { adj[start].add(end); adj[end].add(start); }
+const triSet = new Set();
+for (const { start: a, end: b } of FaceLandmarker.FACE_LANDMARKS_TESSELATION)
+  for (const c of adj[a]) if (adj[b].has(c)) triSet.add([a, b, c].sort((x, y) => x - y).join(","));
+const TRIS = new Uint16Array([...triSet].flatMap(k => k.split(",").map(Number)));
+
+/* ---------------- 변형 수식 (Python으로 사전 검증한 값과 동일) ----------------
+   코 축 a: 미간(168) → 비주(2), 수직 b. u = 축으로부터 가로 거리, v = 0(미간)~1(비주)
+   s = 눈 바깥꼬리 거리(33↔263)로 얼굴 크기 정규화 → 거리·해상도와 무관하게 같은 비율로 변형 */
+function deform(P, out, W, Lg, A) {
+  const px = i => P[2 * i], py = i => P[2 * i + 1];
+  const nx = px(168), ny = py(168);
+  let ax = px(2) - nx, ay = py(2) - ny; const L = Math.hypot(ax, ay) || 1; ax /= L; ay /= L;
+  const bx = -ay, by = ax;
+  const s = Math.hypot(px(33) - px(263), py(33) - py(263)) || 1;
+  const amx = (px(98) + px(327)) / 2 - nx, amy = (py(98) + py(327)) / 2 - ny;
+  const alarV = (amx * ax + amy * ay) / L;
+  const sw = 0.30 * s, sa = 0.26 * s, sl = 0.30 * s;
+  for (let i = 0; i < N; i++) {
+    const dx = px(i) - nx, dy = py(i) - ny;
+    const u = dx * bx + dy * by, v = (dx * ax + dy * ay) / L;
+    const below1 = Math.max(v - 1, 0), below09 = Math.max(v - 0.9, 0);
+    const ww = Math.min(Math.max(v / 0.25, 0), 1) * Math.exp(-below1 * below1 / 0.015) * Math.exp(-((u / sw) ** 2));
+    const wa = Math.exp(-(((v - alarV) / 0.16) ** 2)) * Math.exp(-((u / sa) ** 2));
+    let k = W * 0.28 * ww + A * 0.30 * wa; k = Math.min(Math.max(k, -0.35), 0.45);
+    const t = Math.min(Math.max(v / 0.9, 0), 1);
+    const wl = t * t * Math.exp(-below09 * below09 / 0.012) * Math.exp(-((u / sl) ** 2));
+    const m = Lg * 0.055 * s * wl;
+    out[2 * i] = px(i) - u * k * bx + m * ax;
+    out[2 * i + 1] = py(i) - u * k * by + m * ay;
+  }
+}
+window.__deform = deform; // 검증용
+
+/* ---------------- One Euro 필터 (랜드마크 떨림 보정, 빠른 움직임엔 지연 최소화) ---------------- */
+const euro = { minCut: 1.2, beta: 0.04, dCut: 1.0, x: null, dx: null, t: 0 };
+const alpha = (cut, dt) => { const r = 2 * Math.PI * cut * dt; return r / (r + 1); };
+function filterLandmarks(raw, tMs, scale) {
+  if (!smoothOn || !euro.x) { euro.x = Float32Array.from(raw); euro.dx = new Float32Array(raw.length); euro.t = tMs; return euro.x; }
+  const dt = Math.max((tMs - euro.t) / 1000, 1 / 120); euro.t = tMs;
+  const ad = alpha(euro.dCut, dt);
+  for (let i = 0; i < raw.length; i++) {
+    const d = (raw[i] - euro.x[i]) / dt / scale;           // 얼굴 크기 기준 정규화 속도
+    euro.dx[i] = euro.dx[i] + ad * (d - euro.dx[i]);
+    const a = alpha(euro.minCut + euro.beta * Math.abs(euro.dx[i]) * 100, dt);
+    euro.x[i] = euro.x[i] + a * (raw[i] - euro.x[i]);
+  }
+  return euro.x;
+}
+
+/* ---------------- WebGL ---------------- */
+const gl = glCanvas.getContext("webgl", { preserveDrawingBuffer: true, antialias: true, premultipliedAlpha: false });
+if (!gl) setStatus("이 브라우저는 WebGL을 지원하지 않습니다.");
+const VS = `attribute vec2 aPos; attribute vec2 aUV; uniform vec2 uSize; varying vec2 vUV;
+void main(){ vUV = aUV / uSize; vec2 c = aPos / uSize * 2.0 - 1.0; gl_Position = vec4(c.x, -c.y, 0.0, 1.0); }`;
+const FS = `precision mediump float; varying vec2 vUV; uniform sampler2D uTex;
+void main(){ gl_FragColor = texture2D(uTex, vUV); }`;
+function sh(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+const prog = gl.createProgram();
+gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog);
+gl.useProgram(prog);
+const loc = { pos: gl.getAttribLocation(prog, "aPos"), uv: gl.getAttribLocation(prog, "aUV"), size: gl.getUniformLocation(prog, "uSize") };
+const tex = gl.createTexture();
+gl.bindTexture(gl.TEXTURE_2D, tex);
+for (const [p, v] of [[gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE], [gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR]])
+  gl.texParameteri(gl.TEXTURE_2D, p, v);
+const bufQuadPos = gl.createBuffer(), bufQuadUV = gl.createBuffer(), bufPos = gl.createBuffer(), bufUV = gl.createBuffer(), bufIdx = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufIdx); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, TRIS, gl.STATIC_DRAW);
+const deformed = new Float32Array(N * 2);
+
+function bindAttr(buf, data, locIdx) {
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(locIdx); gl.vertexAttribPointer(locIdx, 2, gl.FLOAT, false, 0, 0);
+}
+function draw(w, h, P) {
+  gl.viewport(0, 0, w, h); gl.uniform2f(loc.size, w, h);
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+  const quad = new Float32Array([0, 0, w, 0, 0, h, w, h]);
+  bindAttr(bufQuadPos, quad, loc.pos); bindAttr(bufQuadUV, quad, loc.uv);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);                      // 1) 원본 프레임 전체
+  if (!P || comparing) return;
+  const any = vals.width || vals.length || vals.alar;
+  if (!any) return;
+  deform(P, deformed, -vals.width, vals.length, -vals.alar);    // 슬라이더 +: 넓게/길게
+  bindAttr(bufPos, deformed, loc.pos); bindAttr(bufUV, P, loc.uv);
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, bufIdx);
+  gl.drawElements(gl.TRIANGLES, TRIS.length, gl.UNSIGNED_SHORT, 0);   // 2) 변형된 얼굴 메쉬를 덮어 그림
+}
+
+function drawMesh(w, h, P) {
+  octx.clearRect(0, 0, w, h);
+  if (!showMesh || !P) return;
+  const Q = (vals.width || vals.length || vals.alar) && !comparing ? deformed : P;
+  octx.strokeStyle = "rgba(120,200,255,.45)"; octx.lineWidth = Math.max(1, w / 900);
+  octx.beginPath();
+  for (const { start, end } of FaceLandmarker.FACE_LANDMARKS_TESSELATION) {
+    octx.moveTo(Q[2 * start], Q[2 * start + 1]); octx.lineTo(Q[2 * end], Q[2 * end + 1]);
+  }
+  octx.stroke();
+  octx.fillStyle = "#FFD54A";
+  for (const i of [168, 6, 197, 195, 5, 4, 1, 2, 98, 327, 129, 358, 64, 294]) {
+    octx.beginPath(); octx.arc(Q[2 * i], Q[2 * i + 1], Math.max(2, w / 400), 0, 7); octx.fill();
+  }
+}
+
+/* ---------------- 메인 루프 ---------------- */
+const raw = new Float32Array(N * 2);
+let lastVideoTime = -1, frames = [], detMs = 0, noFaceSince = 0;
+function frame() {
+  const w = video.videoWidth, h = video.videoHeight;
+  if (w && h && video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    if (glCanvas.width !== w || glCanvas.height !== h) { glCanvas.width = ov.width = w; glCanvas.height = ov.height = h; euro.x = null; }
+    const now = performance.now();
+    const t0 = performance.now();
+    const res = landmarker.detectForVideo(video, now);
+    detMs = performance.now() - t0;
+    let P = null;
+    const lm = res.faceLandmarks && res.faceLandmarks[0];
+    if (lm && lm.length >= N) {
+      for (let i = 0; i < N; i++) { raw[2 * i] = lm[i].x * w; raw[2 * i + 1] = lm[i].y * h; }
+      const s = Math.hypot(raw[66] - raw[526], raw[67] - raw[527]) || 1;   // 33, 263 눈꼬리
+      P = filterLandmarks(raw, now, s);
+      noFaceSince = 0;
+    } else { euro.x = null; noFaceSince ||= now; }
+    $("hint").hidden = !(noFaceSince && now - noFaceSince > 800);
+    draw(w, h, P); drawMesh(w, h, P);
+    frames.push(now); while (frames.length && now - frames[0] > 1000) frames.shift();
+    if (showPerf) $("perf").innerHTML = `FPS ${frames.length}<br>인식 ${detMs.toFixed(1)} ms<br>${delegate} · ${w}×${h}`;
+  }
+  requestAnimationFrame(frame);   // 카메라 전환·재시작 후에도 끊기지 않도록 rAF 루프 + currentTime 변화 검사
+}
+
+/* ---------------- 카메라 ---------------- */
+async function startCamera() {
+  if (!window.isSecureContext) { setStatus("카메라는 HTTPS 주소(또는 localhost)에서만 켜집니다. HTTPS로 배포한 주소로 접속해 주세요."); return; }
+  if (!navigator.mediaDevices?.getUserMedia) { setStatus("이 브라우저는 카메라 접근을 지원하지 않습니다."); return; }
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false, video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }
+    });
+  } catch (e) {
+    setStatus(e.name === "NotAllowedError" ? "카메라 권한이 거부되었습니다. 브라우저 설정에서 카메라를 허용한 뒤 다시 시도해 주세요." : "카메라를 열 수 없습니다: " + e.message, { button: "다시 시도" });
+    return;
+  }
+  video.srcObject = stream; await video.play();
+  const m = facing === "user"; glCanvas.classList.toggle("mirror", m); ov.classList.toggle("mirror", m);
+  euro.x = null; $("status").hidden = true;
+}
+
+async function init() {
+  try {
+    const fileset = await FilesetResolver.forVisionTasks(WASM);
+    const opts = d => ({ baseOptions: { modelAssetPath: MODEL, delegate: d }, runningMode: "VIDEO", numFaces: 1,
+      outputFaceBlendshapes: false, outputFacialTransformationMatrixes: false });
+    try { landmarker = await FaceLandmarker.createFromOptions(fileset, opts("GPU")); delegate = "GPU"; }
+    catch { landmarker = await FaceLandmarker.createFromOptions(fileset, opts("CPU")); delegate = "CPU"; }
+  } catch (e) { setStatus("모델을 불러오지 못했습니다. 네트워크를 확인해 주세요. (" + e.message + ")", { button: "다시 시도" }); return; }
+  // iOS Safari는 사용자 동작 이후에 카메라 재생이 안정적이므로 버튼으로 시작
+  setStatus("준비가 끝났습니다. 카메라 권한을 허용하면 바로 시작합니다.", { button: "카메라 시작" });
+}
+$("startBtn").onclick = async () => {
+  if (!landmarker) { setStatus("모델을 불러오는 중입니다…", { spin: true }); await init(); return; }
+  await startCamera();
+  if (!$("status").hidden) return;
+  if (!frame.started) { frame.started = true; frame(); }
+};
+
+/* ---------------- UI ---------------- */
+const slider = $("slider");
+function syncSlider() {
+  const v = Math.round(vals[tool] * 100);
+  slider.value = v; $("val").textContent = (v > 0 ? "+" : "") + v;
+  slider.style.setProperty("--p", ((v + 100) / 2) + "%");
+  $("caption").textContent = captions[tool];
+  document.querySelectorAll(".tool").forEach(b => {
+    b.setAttribute("aria-pressed", b.dataset.tool === tool);
+    b.classList.toggle("changed", Math.abs(vals[b.dataset.tool]) > 0.001);
+  });
+}
+slider.addEventListener("input", () => { vals[tool] = slider.value / 100; syncSlider(); });
+slider.addEventListener("dblclick", () => { vals[tool] = 0; syncSlider(); });
+document.querySelectorAll(".tool").forEach(b => b.onclick = () => { tool = b.dataset.tool; syncSlider(); });
+
+const cmp = $("compareBtn");
+const on = e => { e.preventDefault(); comparing = true; cmp.classList.add("active"); };
+const off = () => { comparing = false; cmp.classList.remove("active"); };
+cmp.addEventListener("pointerdown", on); ["pointerup", "pointercancel", "pointerleave"].forEach(ev => cmp.addEventListener(ev, off));
+cmp.addEventListener("contextmenu", e => e.preventDefault());
+
+$("menuBtn").onclick = () => { const m = $("menu"); m.hidden = !m.hidden; $("menuBtn").setAttribute("aria-expanded", !m.hidden); };
+$("optMesh").onchange = e => { showMesh = e.target.checked; };
+$("optPerf").onchange = e => { showPerf = e.target.checked; $("perf").hidden = !showPerf; };
+$("optSmooth").onchange = e => { smoothOn = e.target.checked; euro.x = null; };
+$("resetBtn").onclick = () => { vals.width = vals.length = vals.alar = 0; syncSlider(); $("menu").hidden = true; };
+$("flipBtn").onclick = async () => { facing = facing === "user" ? "environment" : "user"; if (landmarker) await startCamera(); };
+$("saveBtn").onclick = () => {
+  const c = document.createElement("canvas"); c.width = glCanvas.width; c.height = glCanvas.height;
+  const x = c.getContext("2d");
+  if (facing === "user") { x.translate(c.width, 0); x.scale(-1, 1); }   // 화면에 보이는 그대로(거울) 저장
+  x.drawImage(glCanvas, 0, 0);
+  c.toBlob(b => { const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = `nose_${Date.now()}.png`; a.click(); }, "image/png");
+  $("menu").hidden = true;
+};
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  else if (!document.hidden && landmarker && frame.started) startCamera();
+});
+
+syncSlider();
+setStatus("얼굴 인식 모델을 불러오는 중입니다…", { spin: true });
+init();
+</script>
+</body>
+</html>
